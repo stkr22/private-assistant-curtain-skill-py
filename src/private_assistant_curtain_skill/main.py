@@ -9,6 +9,7 @@ import paho.mqtt.client as mqtt
 import spacy
 import typer
 from homeassistant_api import Client
+from private_assistant_commons import skill_config
 
 from private_assistant_curtain_skill import config, curtain_skill
 
@@ -24,11 +25,9 @@ app = typer.Typer()
 
 @app.command()
 def start_skill(
-    config_path: Annotated[
-        pathlib.Path, typer.Argument(envvar="PRIVATE_ASSISTANT_CONFIG_PATH")
-    ],
+    config_path: Annotated[pathlib.Path, typer.Argument(envvar="PRIVATE_ASSISTANT_CONFIG_PATH")],
 ):
-    config_obj = config.load_config(config_path)
+    config_obj = skill_config.load_config(config_path, config.SkillConfig)
     curtain_skill_obj = curtain_skill.CurtainSkill(
         mqtt_client=mqtt.Client(
             mqtt.CallbackAPIVersion.VERSION2,
