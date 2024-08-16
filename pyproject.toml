@@ -4,7 +4,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.poetry]
 name = "private-assistant-curtain-skill"
-version = "0.1.8"
+version = "0.1.9"
 description = "Curtain Control Skill for Private Assistant: Enables automated and voice-activated curtain control within smart home environments."
 authors = ["stkr22 <stkr22@github.com>"]
 readme = "README.md"
