@@ -2,24 +2,101 @@ import unittest
 from unittest.mock import Mock, patch
 
 import jinja2
-from homeassistant_api import Entity, Group, State
+import sqlmodel
 from private_assistant_commons import messages
+
+from private_assistant_curtain_skill import models
 from private_assistant_curtain_skill.curtain_skill import Action, CurtainSkill, Parameters
 
 
 class TestCurtainSkill(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        # Set up an in-memory SQLite database
+        cls.engine = sqlmodel.create_engine("sqlite:///:memory:", echo=False)
+        sqlmodel.SQLModel.metadata.create_all(cls.engine)
+
     def setUp(self):
+        # Create a new session for each test
+        self.session = sqlmodel.Session(self.engine)
+
+        # Mock the MQTT client and other dependencies
         self.mock_mqtt_client = Mock()
         self.mock_config = Mock()
-        self.mock_ha_api_client = Mock()
-        self.mock_template_env = Mock(spec=jinja2.Environment)
+        self.mock_template_env = Mock(spec=jinja2.Environment)  # Correct mock with spec
 
+        # Create an instance of CurtainSkill using the in-memory DB and mocked dependencies
         self.skill = CurtainSkill(
             config_obj=self.mock_config,
             mqtt_client=self.mock_mqtt_client,
-            ha_api_client=self.mock_ha_api_client,
+            db_engine=self.engine,
             template_env=self.mock_template_env,
         )
+
+    def tearDown(self):
+        # Clean up the session after each test
+        self.session.close()
+
+    def test_get_devices(self):
+        # Insert a mock device into the in-memory SQLite database
+        mock_device = models.CurtainSkillDevice(
+            id=1,
+            topic="livingroom/curtain/main",
+            alias="main curtain",
+            room="livingroom",
+            payload_open='{"state": "OPEN"}',
+            payload_close='{"state": "CLOSE"}',
+            payload_set_template='{"position": {{ position }}}',
+        )
+        with self.session as session:
+            session.add(mock_device)
+            session.commit()
+
+        # Fetch devices for the "livingroom"
+        devices = self.skill.get_devices("livingroom")
+
+        # Assert that the correct device is returned
+        self.assertEqual(len(devices), 1)
+        self.assertEqual(devices[0].alias, "main curtain")
+        self.assertEqual(devices[0].topic, "livingroom/curtain/main")
+
+    def test_find_parameters(self):
+        # Insert two mock devices into the in-memory SQLite database
+        mock_device_1 = models.CurtainSkillDevice(
+            topic="livingroom/curtain/main",
+            alias="main curtain",
+            room="livingroom",
+            payload_open='{"state": "OPEN"}',
+            payload_close='{"state": "CLOSE"}',
+            payload_set_template='{"position": {{ position }}}',
+        )
+        mock_device_2 = models.CurtainSkillDevice(
+            topic="livingroom/curtain/side",
+            alias="side curtain",
+            room="livingroom",
+            payload_open='{"state": "OPEN"}',
+            payload_close='{"state": "CLOSE"}',
+            payload_set_template='{"position": {{ position }}}',
+        )
+
+        mock_intent_result = Mock(spec=messages.IntentAnalysisResult)
+
+        # Create a mock for the `client_request` attribute
+        mock_client_request = Mock()
+        mock_client_request.room = "livingroom"
+        mock_intent_result.client_request = mock_client_request
+        mock_intent_result.nouns = ["curtain"]  # Example of provided noun
+        mock_intent_result.numbers = [Mock(number_token=50)]  # Setting position to 50
+
+        with patch.object(self.skill, "get_devices", return_value=[mock_device_1, mock_device_2]):
+            # Find parameters for setting the curtain position
+            parameters = self.skill.find_parameters(Action.SET, mock_intent_result)
+
+        # Assert that all devices in the room are included in the parameters
+        self.assertEqual(len(parameters.targets), 2)
+        self.assertEqual(parameters.targets[0].alias, "main curtain")
+        self.assertEqual(parameters.targets[1].alias, "side curtain")
+        self.assertEqual(parameters.position, 50)
 
     def test_calculate_certainty_with_curtain(self):
         mock_intent_result = Mock(spec=messages.IntentAnalysisResult)
@@ -29,122 +106,72 @@ class TestCurtainSkill(unittest.TestCase):
 
     def test_calculate_certainty_without_curtain(self):
         mock_intent_result = Mock(spec=messages.IntentAnalysisResult)
-        mock_intent_result.nouns = ["window"]
+        mock_intent_result.nouns = ["blind"]  # No "curtain"
         certainty = self.skill.calculate_certainty(mock_intent_result)
         self.assertEqual(certainty, 0)
 
-    def test_get_targets(self):
-        # Mock the State object with a concrete state value
-        mock_state = Mock(spec=State)
-        mock_state.state = "open"
-        mock_state.attributes = {"friendly_name": "Living Room Curtain"}
-
-        # Mock the Entity object that contains the State
-        mock_entity = Mock(spec=Entity)
-        mock_entity.state = mock_state
-
-        # Mock the Group object that contains the Entity
-        mock_group = Mock(spec=Group)
-        mock_group.entities = {"entity_id_1": mock_entity}
-
-        # Mock the ha_api_client to return the Group
-        self.skill.ha_api_client.get_entities.return_value = {"cover": mock_group}
-
-        # Call the method and check the result
-        targets = self.skill.get_targets()
-
-        # Assert that the returned targets dictionary contains the correct state string
-        self.assertIn("entity_id_1", targets)
-        self.assertEqual(targets["entity_id_1"], mock_state)
-
-    def test_find_parameter_targets(self):
-        self.skill._target_alias_cache = {
-            "livingroom/curtain/main": "Curtain",
-            "bedroom/curtain/main": "Curtain",
-            "kitchen/curtain/backup": "Curtain",
-        }
-        targets = self.skill.find_parameter_targets("livingroom")
-        self.assertEqual(targets, ["livingroom/curtain/main"])
-
-    def test_get_answer(self):
-        # Set up mock template and return value
-        mock_template = Mock()
-        mock_template.render.return_value = "Opening curtain in living room"
-
-        # Ensure action_to_answer is a dictionary with Action keys and Mock templates as values
-        self.skill.action_to_answer = {
-            Action.OPEN: mock_template,
-            Action.CLOSE: mock_template,
-            Action.SET: mock_template,
-        }
-
-        # Mock the State object
-        mock_state = Mock(spec=State)
-        mock_state.entity_id = "livingroom/curtain/main"
-        mock_state.state = "open"
-        mock_state.attributes = {"friendly_name": "Living Room Curtain"}
-
-        # Mock the Entity object that contains the State
-        mock_entity = Mock(spec=Entity)
-        mock_entity.slug = "curtain/main"
-        mock_entity.state = mock_state
-        mock_entity.entity_id = "livingroom/curtain/main"
-
-        # Mock the Group object that contains the Entity
-        mock_group = Mock(spec=Group)
-        mock_group.entities = {"entity_id_1": mock_entity}
-
-        # Mock the ha_api_client to return the Group
-        self.skill.ha_api_client.get_entities.return_value = {"cover": mock_group}
-
-        # Force the cache to be built by accessing it
-        _ = self.skill.target_alias_cache  # This builds the alias cache using the mocked data
-
-        # Define the parameters and action
-        mock_parameters = Parameters(position=0, targets=["livingroom/curtain/main"])
-
-        # Call the method and check the result
-        answer = self.skill.get_answer(Action.OPEN, mock_parameters)
-
-        # Assert the answer is as expected
-        self.assertEqual(answer, "Opening curtain in living room")
-
-        # Ensure that the template's render method was called with the correct parameters
-        mock_template.render.assert_called_once_with(
-            action=Action.OPEN, parameters=mock_parameters, target_alias_cache=self.skill.target_alias_cache
+    @patch("private_assistant_curtain_skill.curtain_skill.logger")
+    def test_send_mqtt_command(self, mock_logger):
+        # Create mock device
+        mock_device = models.CurtainSkillDevice(
+            id=1,
+            topic="livingroom/curtain/main",
+            alias="main curtain",
+            room="livingroom",
+            payload_open='{"state": "OPEN"}',
+            payload_close='{"state": "CLOSE"}',
+            payload_set_template='{"position": {{ position }}}',
         )
 
-    @patch("private_assistant_curtain_skill.curtain_skill.logger")
-    def test_call_action_api(self, mock_logger):
-        mock_service = Mock()
-        self.skill.ha_api_client.get_domain.return_value = mock_service
+        # Mock parameters for setting the position
+        parameters = Parameters(targets=[mock_device], position=75)
 
-        parameters = Parameters(targets=["livingroom/curtain/main"])
-        self.skill.call_action_api(Action.OPEN, parameters)
+        # Call the method to send the MQTT command (for setting position)
+        self.skill.send_mqtt_command(Action.SET, parameters)
 
-        mock_service.open_cover.assert_called_once_with(entity_id="livingroom/curtain/main")
-        mock_logger.error.assert_not_called()
+        # Assert that the MQTT client sent the correct payload to the correct topic
+        self.mock_mqtt_client.publish.assert_called_once_with("livingroom/curtain/main", '{"position": 75}', qos=1)
+        mock_logger.info.assert_called_with(
+            "Sending payload %s to topic %s via MQTT.", '{"position": 75}', "livingroom/curtain/main"
+        )
 
-    def test_process_request_with_valid_action(self):
+    def test_process_request_with_set_action(self):
+        mock_device = models.CurtainSkillDevice(
+            id=1,
+            topic="livingroom/curtain/main",
+            alias="curtain",
+            room="livingroom",
+            payload_open='{"state": "OPEN"}',
+            payload_close='{"state": "CLOSE"}',
+            payload_set_template='{"position": {{ position }}}',
+        )
+        # Mock the client request
         mock_client_request = Mock()
-        mock_client_request.room = "living room"
+        mock_client_request.room = "livingroom"
+        mock_client_request.text = "set the curtain to 50%"
 
+        # Mock the IntentAnalysisResult with spec
         mock_intent_result = Mock(spec=messages.IntentAnalysisResult)
-        mock_intent_result.verbs = ["open"]
         mock_intent_result.client_request = mock_client_request
+        mock_intent_result.verbs = ["set"]
+        mock_intent_result.nouns = ["curtain"]
+        mock_intent_result.numbers = [Mock(number_token=50)]  # Setting position to 50
 
-        mock_parameters = Parameters(targets=["livingroom/curtain/main"])
+        # Set up mock parameters and method patches
+        mock_parameters = Parameters(targets=[mock_device], position=50)
 
         with (
-            patch.object(self.skill, "get_answer", return_value="Opening curtain in living room") as mock_get_answer,
-            patch.object(self.skill, "call_action_api") as mock_call_action_api,
-            patch.object(self.skill, "find_parameter_targets", return_value=["livingroom/curtain/main"]),
+            patch.object(self.skill, "get_answer", return_value="Setting curtain to 50%") as mock_get_answer,
+            patch.object(self.skill, "send_mqtt_command") as mock_send_mqtt_command,
+            patch.object(self.skill, "find_parameters", return_value=mock_parameters),
             patch.object(self.skill, "add_text_to_output_topic") as mock_add_text_to_output_topic,
         ):
+            # Execute the process_request method
             self.skill.process_request(mock_intent_result)
 
-            mock_get_answer.assert_called_once_with(Action.OPEN, mock_parameters)
-            mock_call_action_api.assert_called_once_with(Action.OPEN, mock_parameters)
+            # Assert that methods were called with expected arguments
+            mock_get_answer.assert_called_once_with(Action.SET, mock_parameters)
+            mock_send_mqtt_command.assert_called_once_with(Action.SET, mock_parameters)
             mock_add_text_to_output_topic.assert_called_once_with(
-                "Opening curtain in living room", client_request=mock_intent_result.client_request
+                "Setting curtain to 50%", client_request=mock_intent_result.client_request
             )
