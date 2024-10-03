@@ -1,25 +1,25 @@
+import asyncio
 from enum import Enum
 
+import aiomqtt
 import jinja2
-import paho.mqtt.client as mqtt
 import private_assistant_commons as commons
-import sqlalchemy
-from private_assistant_commons import messages
 from private_assistant_commons.skill_logger import SkillLogger
 from pydantic import BaseModel, ValidationError
-from sqlmodel import Session, select
+from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
-from private_assistant_curtain_skill.models import CurtainSkillDevice  # New model for curtain skill
+from private_assistant_curtain_skill.models import CurtainSkillDevice
 
 logger = SkillLogger.get_logger(__name__)
 
 
 class Parameters(BaseModel):
     position: int = 0
-    targets: list[CurtainSkillDevice] = []  # Targets are devices from the database
+    targets: list[CurtainSkillDevice] = []
 
 
-# Keeping the Action class exactly as requested
 class Action(Enum):
     HELP = "help"
     OPEN = "open"
@@ -38,14 +38,16 @@ class CurtainSkill(commons.BaseSkill):
     def __init__(
         self,
         config_obj: commons.SkillConfig,
-        mqtt_client: mqtt.Client,
-        db_engine: sqlalchemy.Engine,
+        mqtt_client: aiomqtt.Client,
+        db_engine: AsyncEngine,
         template_env: jinja2.Environment,
+        task_group: asyncio.TaskGroup,
+        logger,
     ) -> None:
-        super().__init__(config_obj, mqtt_client)
+        super().__init__(config_obj, mqtt_client, task_group, logger=logger)
         self.db_engine = db_engine
         self.template_env = template_env
-        self._device_cache: dict[str, list[CurtainSkillDevice]] = {}  # Cache devices by room
+        self._device_cache: dict[str, list[CurtainSkillDevice]] = {}
         self.action_to_answer: dict[Action, jinja2.Template] = {}
 
         # Preload templates
@@ -54,18 +56,18 @@ class CurtainSkill(commons.BaseSkill):
             self.action_to_answer[Action.OPEN] = self.template_env.get_template("state.j2")
             self.action_to_answer[Action.CLOSE] = self.template_env.get_template("state.j2")
             self.action_to_answer[Action.SET] = self.template_env.get_template("set_curtain.j2")
-            logger.debug("Templates successfully loaded during initialization.")
+            self.logger.debug("Templates successfully loaded during initialization.")
         except jinja2.TemplateNotFound as e:
-            logger.error("Failed to load template: %s", e)
+            self.logger.error("Failed to load template: %s", e)
 
-    @property
-    def device_cache(self) -> dict[str, list[CurtainSkillDevice]]:
-        """Lazy-loaded cache for devices."""
+    async def load_device_cache(self) -> None:
+        """Asynchronously load devices into the cache."""
         if not self._device_cache:
-            logger.debug("Loading devices into cache.")
-            with Session(self.db_engine) as session:
+            self.logger.debug("Loading devices into cache asynchronously.")
+            async with AsyncSession(self.db_engine) as session:
                 statement = select(CurtainSkillDevice)
-                devices = session.exec(statement).all()
+                result = await session.exec(statement)
+                devices = result.all()
                 for device in devices:
                     try:
                         device.model_validate(device)
@@ -73,29 +75,30 @@ class CurtainSkill(commons.BaseSkill):
                             self._device_cache[device.room] = []
                         self._device_cache[device.room].append(device)
                     except ValidationError as e:
-                        logger.error("Validation error loading device into cache: %s", e)
-        return self._device_cache
+                        self.logger.error("Validation error loading device into cache: %s", e)
 
-    def get_devices(self, room: str) -> list[CurtainSkillDevice]:
-        """Return devices for a specific room, using cache."""
-        logger.info("Fetching devices for room: %s", room)
-        return self.device_cache.get(room, [])
+    async def get_devices(self, room: str) -> list[CurtainSkillDevice]:
+        """Return devices for a specific room, using async cache loading."""
+        if not self._device_cache:
+            await self.load_device_cache()
+        self.logger.info("Fetching devices for room: %s", room)
+        return self._device_cache.get(room, [])
 
-    def calculate_certainty(self, intent_analysis_result: messages.IntentAnalysisResult) -> float:
+    async def calculate_certainty(self, intent_analysis_result: commons.IntentAnalysisResult) -> float:
         if "curtain" in intent_analysis_result.nouns or "curtains" in intent_analysis_result.nouns:
-            logger.debug("Curtain noun detected, certainty set to 1.0.")
+            self.logger.debug("Curtain noun detected, certainty set to 1.0.")
             return 1.0
-        logger.debug("No curtain noun detected, certainty set to 0.")
+        self.logger.debug("No curtain noun detected, certainty set to 0.")
         return 0
 
-    def find_parameters(self, action: Action, intent_analysis_result: messages.IntentAnalysisResult) -> Parameters:
+    async def find_parameters(self, action: Action, intent_analysis_result: commons.IntentAnalysisResult) -> Parameters:
         parameters = Parameters()
-        devices = self.get_devices(intent_analysis_result.client_request.room)
+        devices = await self.get_devices(intent_analysis_result.client_request.room)
         if action in [Action.OPEN, Action.CLOSE, Action.SET]:
             parameters.targets = [device for device in devices]
         if action == Action.SET and intent_analysis_result.numbers:
             parameters.position = intent_analysis_result.numbers[0].number_token
-        logger.debug("Parameters found for action %s: %s", action, parameters)
+        self.logger.debug("Parameters found for action %s: %s", action, parameters)
         return parameters
 
     def get_answer(self, action: Action, parameters: Parameters) -> str:
@@ -105,13 +108,14 @@ class CurtainSkill(commons.BaseSkill):
                 action=action,
                 parameters=parameters,
             )
-            logger.debug("Generated answer using template for action %s.", action)
+            self.logger.debug("Generated answer using template for action %s.", action)
             return answer
         else:
-            logger.error("No template found for action %s.", action)
+            self.logger.error("No template found for action %s.", action)
             return "Sorry, I couldn't process your request."
 
-    def send_mqtt_command(self, action: Action, parameters: Parameters) -> None:
+    async def send_mqtt_command(self, action: Action, parameters: Parameters) -> None:
+        """Send the MQTT command asynchronously."""
         for device in parameters.targets:
             if action == Action.OPEN:
                 payload = device.payload_open
@@ -120,26 +124,26 @@ class CurtainSkill(commons.BaseSkill):
             elif action == Action.SET:
                 payload = jinja2.Template(device.payload_set_template).render(position=parameters.position)
             else:
-                logger.error("Unknown action: %s", action)
+                self.logger.error("Unknown action: %s", action)
                 continue
 
-            logger.info("Sending payload %s to topic %s via MQTT.", payload, device.topic)
+            self.logger.info("Sending payload %s to topic %s via MQTT.", payload, device.topic)
             try:
-                self.mqtt_client.publish(device.topic, payload, qos=1)
+                await self.mqtt_client.publish(device.topic, payload, qos=1)
             except Exception as e:
-                logger.error("Failed to send MQTT message to topic %s: %s", device.topic, e, exc_info=True)
+                self.logger.error("Failed to send MQTT message to topic %s: %s", device.topic, e, exc_info=True)
 
-    def process_request(self, intent_analysis_result: messages.IntentAnalysisResult) -> None:
+    async def process_request(self, intent_analysis_result: commons.IntentAnalysisResult) -> None:
         action = Action.find_matching_action(intent_analysis_result.verbs)
         if action is None:
-            logger.error("Unrecognized action in verbs: %s", intent_analysis_result.verbs)
+            self.logger.error("Unrecognized action in verbs: %s", intent_analysis_result.verbs)
             return
 
-        parameters = self.find_parameters(action, intent_analysis_result)
+        parameters = await self.find_parameters(action, intent_analysis_result)
         if parameters.targets:
             answer = self.get_answer(action, parameters)
-            self.add_text_to_output_topic(answer, client_request=intent_analysis_result.client_request)
+            self.add_task(self.add_text_to_output_topic(answer, client_request=intent_analysis_result.client_request))
             if action not in [Action.HELP]:
-                self.send_mqtt_command(action, parameters)
+                self.add_task(self.send_mqtt_command(action, parameters))
         else:
-            logger.error("No targets found for action %s.", action)
+            self.logger.error("No targets found for action %s.", action)

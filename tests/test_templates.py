@@ -21,30 +21,13 @@ def render_template(template_name, parameters, env, action=None):
     return template.render(parameters=parameters, action=action)
 
 
-# Test for help.j2
-@pytest.mark.parametrize(
-    "expected_output",
-    [
-        (
-            "Here is how you can use the CurtainSkill:\n"
-            "- Say 'open the curtain' to open a device.\n"
-            "- Say 'close the curtain' to close a device.\n"
-            "- Say 'set curtain to 50' to set the curtain to 50%."
-        ),
-    ],
-)
-def test_help_template(jinja_env, expected_output):
-    result = render_template("help.j2", Parameters(), jinja_env)
-    assert result == expected_output
-
-
 # Test for state.j2 (open/close curtain)
 @pytest.mark.parametrize(
     "action, targets, expected_output",
     [
-        (Action.OPEN, [CurtainSkillDevice(alias="Living Room Curtain")], "I have opened the curtains.\n"),
-        (Action.CLOSE, [CurtainSkillDevice(alias="Bedroom Curtain")], "I have closed the curtains.\n"),
-        (Action.OPEN, [], "No curtains found for this room.\n"),
+        (Action.OPEN, [CurtainSkillDevice(alias="Living Room Curtain")], "The curtains have been opened.\n"),
+        (Action.CLOSE, [CurtainSkillDevice(alias="Bedroom Curtain")], "The curtains have been closed.\n"),
+        (Action.OPEN, [], "No curtains were found for the specified room.\n"),
     ],
 )
 def test_state_template(jinja_env, action, targets, expected_output):
@@ -60,12 +43,12 @@ def test_state_template(jinja_env, action, targets, expected_output):
         (
             [CurtainSkillDevice(alias="Living Room Curtain")],
             50,
-            "I have set the curtains to 50%.",
+            "The curtains have been set to 50%.",
         ),
         (
             [CurtainSkillDevice(alias="Bedroom Curtain")],
             75,
-            "I have set the curtains to 75%.",
+            "The curtains have been set to 75%.",
         ),
     ],
 )

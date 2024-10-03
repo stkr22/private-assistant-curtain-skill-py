@@ -1,9 +1,9 @@
 {% if parameters.targets|length > 0 -%}
     {%- if action.value == "open" -%}
-        I have opened the curtains.
+        The curtains have been opened.
     {%- elif action.value == "close" -%}
-        I have closed the curtains.
+        The curtains have been closed.
     {%- endif %}
 {% else -%}
-    No curtains found for this room.
+    No curtains were found for the specified room.
 {% endif %}
