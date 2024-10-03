@@ -23,7 +23,7 @@ async def start_skill(
     config_obj = skill_config.load_config(config_path, skill_config.SkillConfig)
 
     # Create an async database engine
-    db_engine_async = create_async_engine(skill_config.PostgresConfig.from_env().connection_string)
+    db_engine_async = create_async_engine(skill_config.PostgresConfig.from_env().connection_string_async)
 
     # Create tables asynchronously
     async with db_engine_async.begin() as conn:
