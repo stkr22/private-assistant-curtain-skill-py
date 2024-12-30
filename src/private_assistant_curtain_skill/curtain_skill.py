@@ -95,7 +95,7 @@ class CurtainSkill(commons.BaseSkill):
         parameters = Parameters()
         devices = await self.get_devices(intent_analysis_result.client_request.room)
         if action in [Action.OPEN, Action.CLOSE, Action.SET]:
-            parameters.targets = [device for device in devices]
+            parameters.targets = list(devices)
         if action == Action.SET and intent_analysis_result.numbers:
             parameters.position = intent_analysis_result.numbers[0].number_token
         self.logger.debug("Parameters found for action %s: %s", action, parameters)
@@ -110,9 +110,8 @@ class CurtainSkill(commons.BaseSkill):
             )
             self.logger.debug("Generated answer using template for action %s.", action)
             return answer
-        else:
-            self.logger.error("No template found for action %s.", action)
-            return "Sorry, I couldn't process your request."
+        self.logger.error("No template found for action %s.", action)
+        return "Sorry, I couldn't process your request."
 
     async def send_mqtt_command(self, action: Action, parameters: Parameters) -> None:
         """Send the MQTT command asynchronously."""

@@ -17,7 +17,8 @@ invalid_topics = [
     "home/automation/#",  # Contains invalid wildcard
     " devices/kitchen/curtain ",  # Contains leading/trailing whitespace
     "invalid\0topic",  # Contains null character
-    "home_home/automation/sensor_sensor/very_long_curtain/very_long_topic_exceeding_maximum_length_beyond_128_characters_to_trigger_error",  # Exceeds max length
+    "home_home/automation/sensor_sensor/very_long_curtain/very_long_topic_exceeding_maximum_length_beyond"
+    "_128_characters_to_trigger_error",
 ]
 
 

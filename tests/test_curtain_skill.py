@@ -55,9 +55,8 @@ class TestCurtainSkill(unittest.IsolatedAsyncioTestCase):
             payload_close='{"state": "CLOSE"}',
             payload_set_template='{"position": {{ position }}}',
         )
-        async with AsyncSession(self.engine_async) as session:
-            async with session.begin():
-                session.add(mock_device)
+        async with AsyncSession(self.engine_async) as session, session.begin():
+            session.add(mock_device)
 
         # Fetch devices for the "livingroom"
         devices = await self.skill.get_devices("livingroom")
@@ -86,9 +85,8 @@ class TestCurtainSkill(unittest.IsolatedAsyncioTestCase):
             payload_set_template='{"position": {{ position }}}',
         )
 
-        async with AsyncSession(self.engine_async) as session:
-            async with session.begin():
-                session.add_all([mock_device_1, mock_device_2])
+        async with AsyncSession(self.engine_async) as session, session.begin():
+            session.add_all([mock_device_1, mock_device_2])
 
         mock_intent_result = Mock(spec=messages.IntentAnalysisResult)
         mock_client_request = Mock()
