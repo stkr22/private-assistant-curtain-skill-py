@@ -1,1 +1,1 @@
-The curtains have been set to {{ parameters.position }}%.
+The curtains{% if parameters.rooms %} in {% if parameters.rooms|length == 1 %}the room {{ parameters.rooms[0] }}{% else %}the rooms {{ parameters.rooms[:-1]|join(', ') }} and {{ parameters.rooms[-1] }}{% endif %}{% endif %} have been set to {{ parameters.position }}%.

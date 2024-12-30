@@ -1,8 +1,8 @@
 {% if parameters.targets|length > 0 -%}
     {%- if action.value == "open" -%}
-        The curtains have been opened.
+        The curtains{% if parameters.rooms %} in {% if parameters.rooms|length == 1 %}the room {{ parameters.rooms[0] }}{% else %}the rooms {{ parameters.rooms[:-1]|join(', ') }} and {{ parameters.rooms[-1] }}{% endif %}{% endif %} have been opened.
     {%- elif action.value == "close" -%}
-        The curtains have been closed.
+        The curtains{% if parameters.rooms %} in {% if parameters.rooms|length == 1 %}the room {{ parameters.rooms[0] }}{% else %}the rooms {{ parameters.rooms[:-1]|join(', ') }} and {{ parameters.rooms[-1] }}{% endif %}{% endif %} have been closed.
     {%- endif %}
 {% else -%}
     No curtains were found for the specified room.

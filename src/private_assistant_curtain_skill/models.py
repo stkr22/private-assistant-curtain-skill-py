@@ -15,14 +15,14 @@ class SQLModelValidation(SQLModel):
     model_config = {"from_attributes": True, "validate_assignment": True}
 
 
-class CurtainSkillDevice(SQLModelValidation, table=True):  # type: ignore
+class CurtainSkillDevice(SQLModelValidation, table=True):
     id: int | None = Field(default=None, primary_key=True)
     topic: str
     alias: str
     room: str
-    payload_open: str = '{"state": "OPEN"}'  # Standardized payload for opening the curtain
-    payload_close: str = '{"state": "CLOSE"}'  # Standardized payload for closing the curtain
-    payload_set_template: str = '{"position": {{ position }}}'  # Standardized template for setting position
+    payload_open: str = '{"state": "OPEN"}'
+    payload_close: str = '{"state": "CLOSE"}'
+    payload_set_template: str = '{"position": {{ position }}}'
 
     # Validate the topic field to ensure it conforms to MQTT standards
     @field_validator("topic")
@@ -34,5 +34,4 @@ class CurtainSkillDevice(SQLModelValidation, table=True):  # type: ignore
         if len(value) > 128:
             raise ValueError("Topic length exceeds maximum allowed limit (128 characters).")
 
-        # Trim any leading or trailing whitespace just in case
         return value.strip()

@@ -45,33 +45,59 @@ class TestCurtainSkill(unittest.IsolatedAsyncioTestCase):
             await conn.run_sync(SQLModel.metadata.drop_all)
 
     async def test_get_devices(self):
-        # Insert a mock device into the in-memory SQLite database
-        mock_device = models.CurtainSkillDevice(
+        # Insert mock devices into the in-memory SQLite database
+        mock_device_1 = models.CurtainSkillDevice(
             id=1,
             topic="livingroom/curtain/main",
             alias="main curtain",
-            room="livingroom",
+            room="living room",
+            payload_open='{"state": "OPEN"}',
+            payload_close='{"state": "CLOSE"}',
+            payload_set_template='{"position": {{ position }}}',
+        )
+        mock_device_2 = models.CurtainSkillDevice(
+            id=2,
+            topic="bedroom/curtain/main",
+            alias="main curtain",
+            room="bedroom",
+            payload_open='{"state": "OPEN"}',
+            payload_close='{"state": "CLOSE"}',
+            payload_set_template='{"position": {{ position }}}',
+        )
+        mock_device_3 = models.CurtainSkillDevice(
+            id=3,
+            topic="kitchen/curtain/main",
+            alias="main curtain",
+            room="kitchen",
             payload_open='{"state": "OPEN"}',
             payload_close='{"state": "CLOSE"}',
             payload_set_template='{"position": {{ position }}}',
         )
         async with AsyncSession(self.engine_async) as session, session.begin():
-            session.add(mock_device)
+            session.add_all([mock_device_1, mock_device_2, mock_device_3])
 
-        # Fetch devices for the "livingroom"
-        devices = await self.skill.get_devices("livingroom")
+        devices = await self.skill.get_devices(["living room"])
 
         # Assert that the correct device is returned
         self.assertEqual(len(devices), 1)
         self.assertEqual(devices[0].alias, "main curtain")
         self.assertEqual(devices[0].topic, "livingroom/curtain/main")
 
+        devices = await self.skill.get_devices(["living room", "bedroom"])
+
+        # Assert that the correct device is returned
+        self.assertEqual(len(devices), 2)
+        self.assertEqual(devices[0].alias, "main curtain")
+        self.assertEqual(devices[0].topic, "livingroom/curtain/main")
+        self.assertEqual(devices[1].alias, "main curtain")
+        self.assertEqual(devices[1].topic, "bedroom/curtain/main")
+
     async def test_find_parameters(self):
         # Insert mock devices into the in-memory SQLite database
         mock_device_1 = models.CurtainSkillDevice(
             topic="livingroom/curtain/main",
             alias="main curtain",
-            room="livingroom",
+            room="living room",
             payload_open='{"state": "OPEN"}',
             payload_close='{"state": "CLOSE"}',
             payload_set_template='{"position": {{ position }}}',
@@ -79,18 +105,28 @@ class TestCurtainSkill(unittest.IsolatedAsyncioTestCase):
         mock_device_2 = models.CurtainSkillDevice(
             topic="livingroom/curtain/side",
             alias="side curtain",
-            room="livingroom",
+            room="living room",
+            payload_open='{"state": "OPEN"}',
+            payload_close='{"state": "CLOSE"}',
+            payload_set_template='{"position": {{ position }}}',
+        )
+        mock_device_3 = models.CurtainSkillDevice(
+            id=3,
+            topic="kitchen/curtain/main",
+            alias="main curtain",
+            room="kitchen",
             payload_open='{"state": "OPEN"}',
             payload_close='{"state": "CLOSE"}',
             payload_set_template='{"position": {{ position }}}',
         )
 
         async with AsyncSession(self.engine_async) as session, session.begin():
-            session.add_all([mock_device_1, mock_device_2])
+            session.add_all([mock_device_1, mock_device_2, mock_device_3])
 
         mock_intent_result = Mock(spec=messages.IntentAnalysisResult)
-        mock_client_request = Mock()
-        mock_client_request.room = "livingroom"
+        mock_client_request = Mock(spec=messages.ClientRequest)
+        mock_client_request.room = "living room"
+        mock_intent_result.rooms = []
         mock_intent_result.client_request = mock_client_request
         mock_intent_result.nouns = ["curtain"]
         mock_intent_result.numbers = [Mock(number_token=50)]
@@ -121,7 +157,7 @@ class TestCurtainSkill(unittest.IsolatedAsyncioTestCase):
             id=1,
             topic="livingroom/curtain/main",
             alias="main curtain",
-            room="livingroom",
+            room="living room",
             payload_open='{"state": "OPEN"}',
             payload_close='{"state": "CLOSE"}',
             payload_set_template='{"position": {{ position }}}',
@@ -143,13 +179,13 @@ class TestCurtainSkill(unittest.IsolatedAsyncioTestCase):
             id=1,
             topic="livingroom/curtain/main",
             alias="curtain",
-            room="livingroom",
+            room="living room",
             payload_open='{"state": "OPEN"}',
             payload_close='{"state": "CLOSE"}',
             payload_set_template='{"position": {{ position }}}',
         )
         mock_client_request = Mock()
-        mock_client_request.room = "livingroom"
+        mock_client_request.room = "living room"
         mock_client_request.text = "set the curtain to 50%"
 
         mock_intent_result = Mock(spec=messages.IntentAnalysisResult)
