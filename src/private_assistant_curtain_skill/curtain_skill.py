@@ -4,7 +4,6 @@ from enum import Enum
 import aiomqtt
 import jinja2
 import private_assistant_commons as commons
-from private_assistant_commons.skill_logger import SkillLogger
 from pydantic import BaseModel, ValidationError
 from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlmodel import select
@@ -12,12 +11,11 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from private_assistant_curtain_skill.models import CurtainSkillDevice
 
-logger = SkillLogger.get_logger(__name__)
-
 
 class Parameters(BaseModel):
     position: int = 0
     targets: list[CurtainSkillDevice] = []
+    rooms: list[str] = []
 
 
 class Action(Enum):
@@ -77,12 +75,20 @@ class CurtainSkill(commons.BaseSkill):
                     except ValidationError as e:
                         self.logger.error("Validation error loading device into cache: %s", e)
 
-    async def get_devices(self, room: str) -> list[CurtainSkillDevice]:
+    async def get_devices(self, rooms: list[str]) -> list[CurtainSkillDevice]:
         """Return devices for a specific room, using async cache loading."""
         if not self._device_cache:
             await self.load_device_cache()
-        self.logger.info("Fetching devices for room: %s", room)
-        return self._device_cache.get(room, [])
+        self.logger.info("Fetching devices for room: %s", rooms)
+
+        # Gather devices from all specified rooms
+        devices = []
+        for room in rooms:
+            devices.extend(self._device_cache.get(room, []))
+        return devices
+
+    async def skill_preparations(self):
+        return await super().skill_preparations()
 
     async def calculate_certainty(self, intent_analysis_result: commons.IntentAnalysisResult) -> float:
         if "curtain" in intent_analysis_result.nouns or "curtains" in intent_analysis_result.nouns:
@@ -93,9 +99,10 @@ class CurtainSkill(commons.BaseSkill):
 
     async def find_parameters(self, action: Action, intent_analysis_result: commons.IntentAnalysisResult) -> Parameters:
         parameters = Parameters()
-        devices = await self.get_devices(intent_analysis_result.client_request.room)
+        parameters.rooms = intent_analysis_result.rooms or [intent_analysis_result.client_request.room]
+        devices = await self.get_devices(parameters.rooms)
         if action in [Action.OPEN, Action.CLOSE, Action.SET]:
-            parameters.targets = [device for device in devices]
+            parameters.targets = list(devices)
         if action == Action.SET and intent_analysis_result.numbers:
             parameters.position = intent_analysis_result.numbers[0].number_token
         self.logger.debug("Parameters found for action %s: %s", action, parameters)
@@ -110,9 +117,8 @@ class CurtainSkill(commons.BaseSkill):
             )
             self.logger.debug("Generated answer using template for action %s.", action)
             return answer
-        else:
-            self.logger.error("No template found for action %s.", action)
-            return "Sorry, I couldn't process your request."
+        self.logger.error("No template found for action %s.", action)
+        return "Sorry, I couldn't process your request."
 
     async def send_mqtt_command(self, action: Action, parameters: Parameters) -> None:
         """Send the MQTT command asynchronously."""
