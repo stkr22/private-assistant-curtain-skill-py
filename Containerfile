@@ -1,5 +1,5 @@
 # Build stage: Python 3.12.8-bookworm
-FROM docker.io/library/python:3.12.8-bookworm@sha256:68ca65265c466f4b64f8ddab669e13bcba8d4ba77ec4c26658d36f2b9d1b1cad as build-python
+FROM docker.io/library/python:3.13.5-bookworm@sha256:f7d51cd35460eeb962e8b3752127cf4c14ec2510467b64ce9d0870dc4c830716 as build-python
 
 ENV UV_LINK_MODE=copy \
     UV_COMPILE_BYTECODE=1 \
@@ -24,7 +24,7 @@ RUN --mount=type=cache,target=/root/.cache \
         --group prod
 
 # runtime stage: Python 3.12.8-slim-bookworm
-FROM docker.io/library/python:3.12.8-slim-bookworm@sha256:2199a62885a12290dc9c5be3ca0681d367576ab7bf037da120e564723292a2f0
+FROM docker.io/library/python:3.13.5-slim-bookworm@sha256:6544e0e002b40ae0f59bc3618b07c1e48064c4faed3a15ae2fbd2e8f663e8283
 
 ENV PYTHONUNBUFFERED=1
 
