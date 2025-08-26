@@ -1,1 +1,4 @@
-"""Curtain Control Skill for Private Assistant: Enables automated and voice-activated curtain control within smart home environments."""
+"""Curtain Control Skill for Private Assistant.
+
+Enables automated and voice-activated curtain control within smart home environments.
+"""
