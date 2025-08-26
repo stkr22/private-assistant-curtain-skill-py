@@ -33,7 +33,7 @@ class Action(Enum):
 
 
 class CurtainSkill(commons.BaseSkill):
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         config_obj: commons.SkillConfig,
         mqtt_client: aiomqtt.Client,

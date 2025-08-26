@@ -5,6 +5,7 @@ from sqlmodel import Field, SQLModel
 
 # Define a regex pattern for a valid MQTT topic
 MQTT_TOPIC_REGEX = re.compile(r"[\$#\+\s\0-\31]+")
+MAX_TOPIC_LENGTH = 128
 
 
 class SQLModelValidation(SQLModel):
@@ -31,7 +32,7 @@ class CurtainSkillDevice(SQLModelValidation, table=True):
         # Check for any invalid characters in the topic
         if MQTT_TOPIC_REGEX.findall(value):
             raise ValueError("Topic must not contain '+', '#', whitespace, or control characters.")
-        if len(value) > 128:
-            raise ValueError("Topic length exceeds maximum allowed limit (128 characters).")
+        if len(value) > MAX_TOPIC_LENGTH:
+            raise ValueError(f"Topic length exceeds maximum allowed limit ({MAX_TOPIC_LENGTH} characters).")
 
         return value.strip()
