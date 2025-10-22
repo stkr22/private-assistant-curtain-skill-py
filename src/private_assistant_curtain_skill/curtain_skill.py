@@ -1,35 +1,25 @@
 import asyncio
-from enum import Enum
+import logging
 
 import aiomqtt
 import jinja2
 import private_assistant_commons as commons
-from pydantic import BaseModel, ValidationError
+from private_assistant_commons import (
+    IntentRequest,
+    IntentType,
+)
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncEngine
-from sqlmodel import select
-from sqlmodel.ext.asyncio.session import AsyncSession
 
 from private_assistant_curtain_skill.models import CurtainSkillDevice
 
 
 class Parameters(BaseModel):
+    """Parameters for executing curtain commands."""
+
     position: int = 0
     targets: list[CurtainSkillDevice] = []
     rooms: list[str] = []
-
-
-class Action(Enum):
-    HELP = "help"
-    OPEN = "open"
-    CLOSE = "close"
-    SET = "set"
-
-    @classmethod
-    def find_matching_action(cls, verbs: list):
-        for action in cls:
-            if action.value in verbs:
-                return action
-        return None
 
 
 class CurtainSkill(commons.BaseSkill):
@@ -37,100 +27,175 @@ class CurtainSkill(commons.BaseSkill):
         self,
         config_obj: commons.SkillConfig,
         mqtt_client: aiomqtt.Client,
-        db_engine: AsyncEngine,
         template_env: jinja2.Environment,
         task_group: asyncio.TaskGroup,
-        logger,
+        engine: AsyncEngine,
+        logger: logging.Logger,
     ) -> None:
-        super().__init__(config_obj, mqtt_client, task_group, logger=logger)
-        self.db_engine = db_engine
+        # Pass engine to BaseSkill (NEW REQUIRED PARAMETER)
+        super().__init__(
+            config_obj=config_obj,
+            mqtt_client=mqtt_client,
+            task_group=task_group,
+            engine=engine,
+            logger=logger,
+        )
+
+        # Configure supported intents (replaces calculate_certainty)
+        self.supported_intents = {
+            IntentType.DEVICE_OPEN: 0.8,  # "open the curtains"
+            IntentType.DEVICE_CLOSE: 0.8,  # "close the curtains"
+            IntentType.DEVICE_SET: 0.9,  # "set curtain to 50%"
+            IntentType.SYSTEM_HELP: 0.7,  # "help with curtains"
+        }
+
+        # Configure device types for device registry
+        self.supported_device_types = ["curtain"]
+
+        # Store template environment for response generation
         self.template_env = template_env
-        self._device_cache: dict[str, list[CurtainSkillDevice]] = {}
-        self.action_to_answer: dict[Action, jinja2.Template] = {}
 
-        # Preload templates
-        try:
-            self.action_to_answer[Action.HELP] = self.template_env.get_template("help.j2")
-            self.action_to_answer[Action.OPEN] = self.template_env.get_template("state.j2")
-            self.action_to_answer[Action.CLOSE] = self.template_env.get_template("state.j2")
-            self.action_to_answer[Action.SET] = self.template_env.get_template("set_curtain.j2")
-            self.logger.debug("Templates successfully loaded during initialization.")
-        except jinja2.TemplateNotFound as e:
-            self.logger.error("Failed to load template: %s", e)
+        # Template mapping for intent types
+        self.intent_to_template: dict[IntentType, jinja2.Template] = {}
 
-    async def load_device_cache(self) -> None:
-        """Asynchronously load devices into the cache."""
-        if not self._device_cache:
-            self.logger.debug("Loading devices into cache asynchronously.")
-            async with AsyncSession(self.db_engine) as session:
-                statement = select(CurtainSkillDevice)
-                result = await session.exec(statement)
-                devices = result.all()
-                for device in devices:
-                    try:
-                        device.model_validate(device)
-                        if device.room not in self._device_cache:
-                            self._device_cache[device.room] = []
-                        self._device_cache[device.room].append(device)
-                    except ValidationError as e:
-                        self.logger.error("Validation error loading device into cache: %s", e)
+        # Load all templates
+        self._load_templates()
 
-    async def get_devices(self, rooms: list[str]) -> list[CurtainSkillDevice]:
-        """Return devices for a specific room, using async cache loading."""
-        if not self._device_cache:
-            await self.load_device_cache()
-        self.logger.info("Fetching devices for room: %s", rooms)
+    def _load_templates(self) -> None:
+        """Load and validate all required templates with fallback handling.
 
-        # Gather devices from all specified rooms
-        devices = []
-        for room in rooms:
-            devices.extend(self._device_cache.get(room, []))
-        return devices
+        Raises:
+            RuntimeError: If critical templates cannot be loaded
+        """
+        template_mappings = {
+            IntentType.SYSTEM_HELP: "help.j2",
+            IntentType.DEVICE_OPEN: "state.j2",
+            IntentType.DEVICE_CLOSE: "state.j2",
+            IntentType.DEVICE_SET: "set_curtain.j2",
+        }
 
-    async def skill_preparations(self):
-        return await super().skill_preparations()
+        failed_templates = []
+        for intent_type, template_name in template_mappings.items():
+            try:
+                self.intent_to_template[intent_type] = self.template_env.get_template(template_name)
+            except jinja2.TemplateNotFound as e:
+                self.logger.error("Failed to load template %s: %s", template_name, e)
+                failed_templates.append(template_name)
 
-    async def calculate_certainty(self, intent_analysis_result: commons.IntentAnalysisResult) -> float:
-        if "curtain" in intent_analysis_result.nouns or "curtains" in intent_analysis_result.nouns:
-            self.logger.debug("Curtain noun detected, certainty set to 1.0.")
-            return 1.0
-        self.logger.debug("No curtain noun detected, certainty set to 0.")
-        return 0
+        if failed_templates:
+            raise RuntimeError(f"Critical templates failed to load: {', '.join(failed_templates)}")
 
-    async def find_parameters(self, action: Action, intent_analysis_result: commons.IntentAnalysisResult) -> Parameters:
+        self.logger.debug("All templates successfully loaded during initialization.")
+
+    def _get_curtain_devices(self, target_rooms: list[str]) -> list[CurtainSkillDevice]:
+        """
+        Get curtain devices from global registry for specified rooms.
+
+        Args:
+            target_rooms: List of room names to filter devices by
+
+        Returns:
+            List of CurtainSkillDevice instances for the target rooms
+        """
+        curtain_devices = []
+        for device in self.global_devices:
+            # Check if device is a curtain and in one of the target rooms
+            if device.device_type.name == "curtain" and device.room and device.room.name in target_rooms:
+                try:
+                    curtain_device = CurtainSkillDevice.from_global_device(device)
+                    curtain_devices.append(curtain_device)
+                except Exception as e:
+                    self.logger.error(
+                        "Failed to transform device %s to CurtainSkillDevice: %s",
+                        device.name,
+                        e,
+                        exc_info=True,
+                    )
+        return curtain_devices
+
+    async def _extract_parameters(self, intent_request: IntentRequest) -> Parameters:
+        """
+        Extract parameters from IntentRequest for curtain control.
+
+        Args:
+            intent_request: The validated intent request
+
+        Returns:
+            Parameters object with devices, rooms, and position
+        """
+        classified_intent = intent_request.classified_intent
+        client_request = intent_request.client_request
+
         parameters = Parameters()
-        parameters.rooms = intent_analysis_result.rooms or [intent_analysis_result.client_request.room]
-        devices = await self.get_devices(parameters.rooms)
-        if action in [Action.OPEN, Action.CLOSE, Action.SET]:
-            parameters.targets = list(devices)
-        if action == Action.SET and intent_analysis_result.numbers:
-            parameters.position = intent_analysis_result.numbers[0].number_token
-        self.logger.debug("Parameters found for action %s: %s", action, parameters)
+
+        # Extract room entities or default to current room
+        room_entities = classified_intent.entities.get("rooms", [])
+        if room_entities:
+            parameters.rooms = [entity.normalized_value for entity in room_entities]
+        else:
+            parameters.rooms = [client_request.room]
+
+        # Get curtain devices for target rooms
+        parameters.targets = self._get_curtain_devices(parameters.rooms)
+
+        # Extract position for SET intent
+        if classified_intent.intent_type == IntentType.DEVICE_SET:
+            number_entities = classified_intent.entities.get("numbers", [])
+            if number_entities:
+                try:
+                    parameters.position = int(number_entities[0].normalized_value)
+                except (ValueError, TypeError) as e:
+                    self.logger.warning("Failed to parse position from entity: %s", e)
+                    parameters.position = 0
+
+        self.logger.debug(
+            "Extracted parameters for intent %s: %d targets in rooms %s",
+            classified_intent.intent_type,
+            len(parameters.targets),
+            parameters.rooms,
+        )
         return parameters
 
-    def get_answer(self, action: Action, parameters: Parameters) -> str:
-        template = self.action_to_answer.get(action)
+    def _render_response(self, intent_type: IntentType, parameters: Parameters) -> str:
+        """
+        Render response template for the given intent type.
+
+        Args:
+            intent_type: The type of intent to render response for
+            parameters: Parameters containing device and room information
+
+        Returns:
+            Rendered response string
+        """
+        template = self.intent_to_template.get(intent_type)
         if template:
             answer = template.render(
-                action=action,
+                intent_type=intent_type,
                 parameters=parameters,
             )
-            self.logger.debug("Generated answer using template for action %s.", action)
+            self.logger.debug("Generated answer using template for intent %s.", intent_type)
             return answer
-        self.logger.error("No template found for action %s.", action)
+        self.logger.error("No template found for intent %s.", intent_type)
         return "Sorry, I couldn't process your request."
 
-    async def send_mqtt_command(self, action: Action, parameters: Parameters) -> None:
-        """Send the MQTT command asynchronously."""
+    async def _send_mqtt_commands(self, intent_type: IntentType, parameters: Parameters) -> None:
+        """
+        Send MQTT commands to control curtain devices.
+
+        Args:
+            intent_type: The intent type (DEVICE_OPEN, DEVICE_CLOSE, DEVICE_SET)
+            parameters: Parameters containing target devices and position
+        """
         for device in parameters.targets:
-            if action == Action.OPEN:
+            # Determine payload based on intent type
+            if intent_type == IntentType.DEVICE_OPEN:
                 payload = device.payload_open
-            elif action == Action.CLOSE:
+            elif intent_type == IntentType.DEVICE_CLOSE:
                 payload = device.payload_close
-            elif action == Action.SET:
+            elif intent_type == IntentType.DEVICE_SET:
                 payload = jinja2.Template(device.payload_set_template).render(position=parameters.position)
             else:
-                self.logger.error("Unknown action: %s", action)
+                self.logger.error("Unknown intent type for MQTT command: %s", intent_type)
                 continue
 
             self.logger.info("Sending payload %s to topic %s via MQTT.", payload, device.topic)
@@ -139,17 +204,129 @@ class CurtainSkill(commons.BaseSkill):
             except Exception as e:
                 self.logger.error("Failed to send MQTT message to topic %s: %s", device.topic, e, exc_info=True)
 
-    async def process_request(self, intent_analysis_result: commons.IntentAnalysisResult) -> None:
-        action = Action.find_matching_action(intent_analysis_result.verbs)
-        if action is None:
-            self.logger.error("Unrecognized action in verbs: %s", intent_analysis_result.verbs)
+    async def _handle_device_open(self, intent_request: IntentRequest) -> None:
+        """Handle DEVICE_OPEN intent - open curtains.
+
+        Args:
+            intent_request: The intent request with classified intent and client request
+        """
+        client_request = intent_request.client_request
+
+        # Extract parameters from entities
+        parameters = await self._extract_parameters(intent_request)
+
+        if not parameters.targets:
+            await self.send_response(
+                f"I couldn't find any curtains in {', '.join(parameters.rooms)}.",
+                client_request=client_request,
+            )
             return
 
-        parameters = await self.find_parameters(action, intent_analysis_result)
-        if parameters.targets:
-            answer = self.get_answer(action, parameters)
-            self.add_task(self.send_response(answer, client_request=intent_analysis_result.client_request))
-            if action not in [Action.HELP]:
-                self.add_task(self.send_mqtt_command(action, parameters))
+        # Send response and MQTT commands
+        answer = self._render_response(IntentType.DEVICE_OPEN, parameters)
+        self.add_task(self.send_response(answer, client_request=client_request))
+        self.add_task(self._send_mqtt_commands(IntentType.DEVICE_OPEN, parameters))
+
+    async def _handle_device_close(self, intent_request: IntentRequest) -> None:
+        """Handle DEVICE_CLOSE intent - close curtains.
+
+        Args:
+            intent_request: The intent request with classified intent and client request
+        """
+        client_request = intent_request.client_request
+
+        # Extract parameters from entities
+        parameters = await self._extract_parameters(intent_request)
+
+        if not parameters.targets:
+            await self.send_response(
+                f"I couldn't find any curtains in {', '.join(parameters.rooms)}.",
+                client_request=client_request,
+            )
+            return
+
+        # Send response and MQTT commands
+        answer = self._render_response(IntentType.DEVICE_CLOSE, parameters)
+        self.add_task(self.send_response(answer, client_request=client_request))
+        self.add_task(self._send_mqtt_commands(IntentType.DEVICE_CLOSE, parameters))
+
+    async def _handle_device_set(self, intent_request: IntentRequest) -> None:
+        """Handle DEVICE_SET intent - set curtain position.
+
+        Args:
+            intent_request: The intent request with classified intent and client request
+        """
+        classified_intent = intent_request.classified_intent
+        client_request = intent_request.client_request
+
+        # Extract parameters from entities
+        parameters = await self._extract_parameters(intent_request)
+
+        if not parameters.targets:
+            await self.send_response(
+                f"I couldn't find any curtains in {', '.join(parameters.rooms)}.",
+                client_request=client_request,
+            )
+            return
+
+        if parameters.position == 0:
+            number_entities = classified_intent.entities.get("numbers", [])
+            if not number_entities:
+                await self.send_response(
+                    "What position would you like to set the curtains to?",
+                    client_request=client_request,
+                )
+                return
+
+        # Send response and MQTT commands
+        answer = self._render_response(IntentType.DEVICE_SET, parameters)
+        self.add_task(self.send_response(answer, client_request=client_request))
+        self.add_task(self._send_mqtt_commands(IntentType.DEVICE_SET, parameters))
+
+    async def _handle_system_help(self, intent_request: IntentRequest) -> None:
+        """Handle SYSTEM_HELP intent - show help information.
+
+        Args:
+            intent_request: The intent request with classified intent and client request
+        """
+        client_request = intent_request.client_request
+        current_room = client_request.room
+
+        # Build empty parameters for help template
+        parameters = Parameters(rooms=[current_room])
+
+        # Send response
+        answer = self._render_response(IntentType.SYSTEM_HELP, parameters)
+        self.add_task(self.send_response(answer, client_request=client_request))
+
+    async def process_request(self, intent_request: IntentRequest) -> None:
+        """Main request processing method - routes intent to appropriate handler.
+
+        Orchestrates the full command processing pipeline:
+        1. Extract intent type from classified intent
+        2. Route to appropriate intent handler
+        3. Handler extracts entities, controls devices, and sends response
+
+        Args:
+            intent_request: The intent request containing classified intent and client info
+        """
+        classified_intent = intent_request.classified_intent
+        intent_type = classified_intent.intent_type
+
+        self.logger.info("Processing intent %s with confidence %.2f", intent_type, classified_intent.confidence)
+
+        # Route to appropriate handler
+        if intent_type == IntentType.DEVICE_OPEN:
+            await self._handle_device_open(intent_request)
+        elif intent_type == IntentType.DEVICE_CLOSE:
+            await self._handle_device_close(intent_request)
+        elif intent_type == IntentType.DEVICE_SET:
+            await self._handle_device_set(intent_request)
+        elif intent_type == IntentType.SYSTEM_HELP:
+            await self._handle_system_help(intent_request)
         else:
-            self.logger.error("No targets found for action %s.", action)
+            self.logger.warning("Unsupported intent type: %s", intent_type)
+            await self.send_response(
+                "I'm not sure how to handle that request.",
+                client_request=intent_request.client_request,
+            )
