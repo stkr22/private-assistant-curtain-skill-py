@@ -44,7 +44,7 @@ Changelog = "https://github.com/stkr22/private-assistant-curtain-skill-py/blob/m
 
 [dependency-groups]
 dev = [
-    "ruff~=0.12.3",
+    "ruff~=0.14.1",
     "mypy~=1.17.0",
     "pytest~=8.4.1",
     "pytest-cov~=6.2.1",
