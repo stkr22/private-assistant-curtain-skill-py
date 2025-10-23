@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.0.1](https://github.com/stkr22/private-assistant-curtain-skill-py/compare/v2.0.0...v2.0.1) (2025-10-23)
+
+
+### Bug Fixes
+
+* capitalize AS and updating image ([027adf8](https://github.com/stkr22/private-assistant-curtain-skill-py/commit/027adf81fd19f0069cfa72552139b2d5d8284d23))
+
 ## [2.0.0](https://github.com/stkr22/private-assistant-curtain-skill-py/compare/v1.1.2...v2.0.0) (2025-10-22)
 
 
