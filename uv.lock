@@ -311,7 +311,7 @@ wheels = [
 
 [[package]]
 name = "private-assistant-curtain-skill"
-version = "1.1.2"
+version = "2.0.1"
 source = { editable = "." }
 dependencies = [
     { name = "jinja2" },
