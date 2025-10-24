@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.0.2](https://github.com/stkr22/private-assistant-curtain-skill-py/compare/v2.0.1...v2.0.2) (2025-10-24)
+
+
+### Bug Fixes
+
+* :bug: entity keys to singular and add intent validation [AI] ([0e1e498](https://github.com/stkr22/private-assistant-curtain-skill-py/commit/0e1e498f55019fd89f6809e89430ad4129c9a97d))
+* :bug: entity keys to singular and add intent validation [AI] ([d9a4bef](https://github.com/stkr22/private-assistant-curtain-skill-py/commit/d9a4bef69f5a4a69c5e800b16f736e831f27e40e))
+
 ## [2.0.1](https://github.com/stkr22/private-assistant-curtain-skill-py/compare/v2.0.0...v2.0.1) (2025-10-23)
 
 
