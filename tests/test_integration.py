@@ -124,9 +124,31 @@ async def test_device_type(db_session) -> DeviceType:
 
 @pytest.fixture
 async def test_room(db_session) -> Room:
-    """Create a test room in the database."""
-    room_name = f"test_room_{uuid.uuid4().hex[:8]}"
-    room = Room(name=room_name)
+    """Create a test room in the database (studio).
+
+    Uses realistic room naming patterns based on typical smart home setups.
+    """
+    room = Room(name="studio")
+    db_session.add(room)
+    await db_session.flush()
+    await db_session.refresh(room)
+    return room
+
+
+@pytest.fixture
+async def test_room_office(db_session) -> Room:
+    """Create a second test room (office) for multi-room tests."""
+    room = Room(name="office")
+    db_session.add(room)
+    await db_session.flush()
+    await db_session.refresh(room)
+    return room
+
+
+@pytest.fixture
+async def test_room_guest(db_session) -> Room:
+    """Create a third test room (guest room) for multi-room tests."""
+    room = Room(name="guest room")
     db_session.add(room)
     await db_session.flush()
     await db_session.refresh(room)
@@ -135,8 +157,9 @@ async def test_room(db_session) -> Room:
 
 @pytest.fixture
 async def test_device(db_session, test_skill_entity, test_device_type, test_room) -> AsyncGenerator[GlobalDevice, None]:
-    """Create a single test device in the database.
+    """Create a single test device in the database (studio window blinds).
 
+    Uses realistic MQTT topic patterns based on typical zigbee2mqtt setups.
     Note: This fixture must be created BEFORE the running_skill fixture
     so the device is loaded during skill initialization.
     """
@@ -148,10 +171,10 @@ async def test_device(db_session, test_skill_entity, test_device_type, test_room
 
     device = GlobalDevice(
         device_type_id=test_device_type.id,
-        name="test curtain",
-        pattern=["test curtain", f"{test_room.name} test curtain"],
+        name="window blinds",
+        pattern=["window blinds", "blinds"],
         device_attributes={
-            "topic": "test/integration/curtain/main/set",
+            "topic": "zigbee2mqtt/studio/motor/window_blinds/set",
             "payload_open": '{"state": "OPEN"}',
             "payload_close": '{"state": "CLOSE"}',
             "payload_set_template": '{"position": {{ position }}}',
@@ -169,6 +192,38 @@ async def test_device(db_session, test_skill_entity, test_device_type, test_room
 
     # Cleanup: Delete test device
     logger.debug("Cleaning up device %s", device.id)
+    await db_session.delete(device)
+    await db_session.commit()
+
+
+@pytest.fixture
+async def test_device_office(
+    db_session, test_skill_entity, test_device_type, test_room_office
+) -> AsyncGenerator[GlobalDevice, None]:
+    """Create an office curtain device for multi-room tests."""
+    await db_session.refresh(test_room_office)
+    await db_session.refresh(test_skill_entity)
+    await db_session.refresh(test_device_type)
+
+    device = GlobalDevice(
+        device_type_id=test_device_type.id,
+        name="door curtain",
+        pattern=["door curtain", "curtain"],
+        device_attributes={
+            "topic": "zigbee2mqtt/office/motor/door_curtain/set",
+            "payload_open": '{"state": "OPEN"}',
+            "payload_close": '{"state": "CLOSE"}',
+            "payload_set_template": '{"position": {{ position }}}',
+        },
+        room_id=test_room_office.id,
+        skill_id=test_skill_entity.id,
+    )
+    db_session.add(device)
+    await db_session.commit()
+    await db_session.refresh(device, ["room"])
+
+    yield device
+
     await db_session.delete(device)
     await db_session.commit()
 
@@ -262,12 +317,17 @@ class TestDeviceOpenCommand:
     ):
         """Test that DEVICE_OPEN intent triggers correct MQTT command and response.
 
+        Uses realistic device setup:
+        - Room: studio
+        - Device: window blinds
+        - MQTT: zigbee2mqtt/studio/motor/window_blinds/set
+
         Flow:
         1. Publish IntentRequest with DEVICE_OPEN intent
         2. Assert device command published to correct topic with correct payload
         3. Assert response published to output topic
         """
-        output_topic = f"test/output/{uuid.uuid4().hex}"
+        output_topic = f"assistant/studio/output/{uuid.uuid4().hex[:8]}"
         device_topic = test_device.device_attributes["topic"]
 
         # Subscribe to topics before sending request
@@ -279,15 +339,27 @@ class TestDeviceOpenCommand:
             id=uuid.uuid4(),
             intent_type=IntentType.DEVICE_OPEN,
             confidence=0.95,
-            entities={},
+            entities={
+                "device": [
+                    Entity(
+                        id=uuid.uuid4(),
+                        type=EntityType.DEVICE,
+                        raw_text="window blinds",
+                        normalized_value="curtain",
+                        confidence=0.95,
+                        metadata={"device_type": "curtain", "is_generic": False},
+                        linked_to=[],
+                    )
+                ]
+            },
             alternative_intents=[],
-            raw_text="open the curtain",
+            raw_text="open the window blinds",
             timestamp=datetime.now(),
         )
 
         client_request = ClientRequest(
             id=uuid.uuid4(),
-            text="open the curtain",
+            text="open the window blinds",
             room=test_room.name,
             output_topic=output_topic,
         )
@@ -343,8 +415,14 @@ class TestDeviceCloseCommand:
         running_skill,  # noqa: ARG002
         mqtt_test_client,
     ):
-        """Test that DEVICE_CLOSE intent triggers correct MQTT command."""
-        output_topic = f"test/output/{uuid.uuid4().hex}"
+        """Test that DEVICE_CLOSE intent triggers correct MQTT command.
+
+        Uses realistic device setup:
+        - Room: studio
+        - Device: window blinds
+        - MQTT: zigbee2mqtt/studio/motor/window_blinds/set
+        """
+        output_topic = f"assistant/studio/output/{uuid.uuid4().hex[:8]}"
         device_topic = test_device.device_attributes["topic"]
 
         await mqtt_test_client.subscribe(output_topic)
@@ -354,15 +432,27 @@ class TestDeviceCloseCommand:
             id=uuid.uuid4(),
             intent_type=IntentType.DEVICE_CLOSE,
             confidence=0.95,
-            entities={},
+            entities={
+                "device": [
+                    Entity(
+                        id=uuid.uuid4(),
+                        type=EntityType.DEVICE,
+                        raw_text="blinds",
+                        normalized_value="curtain",
+                        confidence=0.95,
+                        metadata={"device_type": "curtain", "is_generic": False},
+                        linked_to=[],
+                    )
+                ]
+            },
             alternative_intents=[],
-            raw_text="close the curtain",
+            raw_text="close the blinds",
             timestamp=datetime.now(),
         )
 
         client_request = ClientRequest(
             id=uuid.uuid4(),
-            text="close the curtain",
+            text="close the blinds",
             room=test_room.name,
             output_topic=output_topic,
         )
@@ -403,8 +493,15 @@ class TestDeviceSetCommand:
         running_skill,  # noqa: ARG002
         mqtt_test_client,
     ):
-        """Test that DEVICE_SET intent with position triggers correct MQTT command."""
-        output_topic = f"test/output/{uuid.uuid4().hex}"
+        """Test that DEVICE_SET intent with position triggers correct MQTT command.
+
+        Uses realistic device setup and entity structure:
+        - Room: studio
+        - Device: window blinds
+        - MQTT: zigbee2mqtt/studio/motor/window_blinds/set
+        - Entity: singular "number" key (matching intent classifier format)
+        """
+        output_topic = f"assistant/studio/output/{uuid.uuid4().hex[:8]}"
         device_topic = test_device.device_attributes["topic"]
         target_position = 75
 
@@ -415,7 +512,18 @@ class TestDeviceSetCommand:
             intent_type=IntentType.DEVICE_SET,
             confidence=0.95,
             entities={
-                "numbers": [
+                "device": [
+                    Entity(
+                        id=uuid.uuid4(),
+                        type=EntityType.DEVICE,
+                        raw_text="blinds",
+                        normalized_value="curtain",
+                        confidence=0.95,
+                        metadata={"device_type": "curtain", "is_generic": False},
+                        linked_to=[],
+                    )
+                ],
+                "number": [
                     Entity(
                         id=uuid.uuid4(),
                         type=EntityType.NUMBER,
@@ -428,13 +536,13 @@ class TestDeviceSetCommand:
                 ]
             },
             alternative_intents=[],
-            raw_text="set curtain to 75 percent",
+            raw_text="set blinds to 75 percent",
             timestamp=datetime.now(),
         )
 
         client_request = ClientRequest(
             id=uuid.uuid4(),
-            text="set curtain to 75 percent",
+            text="set blinds to 75 percent",
             room=test_room.name,
             output_topic=output_topic,
         )
@@ -473,8 +581,11 @@ class TestDeviceNotFound:
         running_skill_no_devices,  # noqa: ARG002
         mqtt_test_client,
     ):
-        """Test handling when no devices are found in specified room."""
-        output_topic = f"test/output/{uuid.uuid4().hex}"
+        """Test handling when no devices are found in specified room.
+
+        Uses realistic room name that doesn't have any devices configured.
+        """
+        output_topic = f"assistant/garage/output/{uuid.uuid4().hex[:8]}"
 
         await mqtt_test_client.subscribe(output_topic)
 
@@ -482,7 +593,19 @@ class TestDeviceNotFound:
             id=uuid.uuid4(),
             intent_type=IntentType.DEVICE_OPEN,
             confidence=0.95,
-            entities={},
+            entities={
+                "device": [
+                    Entity(
+                        id=uuid.uuid4(),
+                        type=EntityType.DEVICE,
+                        raw_text="curtain",
+                        normalized_value="curtain",
+                        confidence=0.95,
+                        metadata={"device_type": "curtain", "is_generic": True},
+                        linked_to=[],
+                    )
+                ]
+            },
             alternative_intents=[],
             raw_text="open the curtain",
             timestamp=datetime.now(),
@@ -491,7 +614,7 @@ class TestDeviceNotFound:
         client_request = ClientRequest(
             id=uuid.uuid4(),
             text="open the curtain",
-            room="nonexistent_room",
+            room="garage",
             output_topic=output_topic,
         )
 

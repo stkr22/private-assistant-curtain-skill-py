@@ -45,7 +45,7 @@ class CurtainSkill(commons.BaseSkill):
         self.supported_intents = {
             IntentType.DEVICE_OPEN: 0.8,  # "open the curtains"
             IntentType.DEVICE_CLOSE: 0.8,  # "close the curtains"
-            IntentType.DEVICE_SET: 0.9,  # "set curtain to 50%"
+            IntentType.DEVICE_SET: 0.8,  # "set curtain to 50%"
             IntentType.SYSTEM_HELP: 0.7,  # "help with curtains"
         }
 
@@ -86,6 +86,36 @@ class CurtainSkill(commons.BaseSkill):
             raise RuntimeError(f"Critical templates failed to load: {', '.join(failed_templates)}")
 
         self.logger.debug("All templates successfully loaded during initialization.")
+
+    def _is_curtain_intent(self, classified_intent: commons.ClassifiedIntent) -> bool:
+        """Validate if the intent is actually for curtain control.
+
+        Checks for device entity with:
+        1. device_type in supported_device_types OR
+        2. is_generic=True with normalized_value in supported_device_types
+
+        Args:
+            classified_intent: The classified intent with extracted entities
+
+        Returns:
+            True if intent is for curtain control, False otherwise
+        """
+        # Check for device entities
+        device_entities = classified_intent.entities.get("device", [])
+        for device_entity in device_entities:
+            device_type = device_entity.metadata.get("device_type", "")
+            is_generic = device_entity.metadata.get("is_generic", False)
+
+            # Accept if device_type is in supported_device_types OR it's a generic device reference
+            if device_type in self.supported_device_types or (
+                is_generic and device_entity.normalized_value in self.supported_device_types
+            ):
+                self.logger.debug("Found curtain device entity: %s", device_entity.normalized_value)
+                return True
+
+        # No curtain-related entities found
+        self.logger.debug("No curtain-related entities found in intent")
+        return False
 
     def _get_curtain_devices(self, target_rooms: list[str]) -> list[CurtainSkillDevice]:
         """
@@ -129,7 +159,7 @@ class CurtainSkill(commons.BaseSkill):
         parameters = Parameters()
 
         # Extract room entities or default to current room
-        room_entities = classified_intent.entities.get("rooms", [])
+        room_entities = classified_intent.entities.get("room", [])
         if room_entities:
             parameters.rooms = [entity.normalized_value for entity in room_entities]
         else:
@@ -140,7 +170,7 @@ class CurtainSkill(commons.BaseSkill):
 
         # Extract position for SET intent
         if classified_intent.intent_type == IntentType.DEVICE_SET:
-            number_entities = classified_intent.entities.get("numbers", [])
+            number_entities = classified_intent.entities.get("number", [])
             if number_entities:
                 try:
                     parameters.position = int(number_entities[0].normalized_value)
@@ -270,7 +300,7 @@ class CurtainSkill(commons.BaseSkill):
             return
 
         if parameters.position == 0:
-            number_entities = classified_intent.entities.get("numbers", [])
+            number_entities = classified_intent.entities.get("number", [])
             if not number_entities:
                 await self.send_response(
                     "What position would you like to set the curtains to?",
@@ -304,8 +334,9 @@ class CurtainSkill(commons.BaseSkill):
 
         Orchestrates the full command processing pipeline:
         1. Extract intent type from classified intent
-        2. Route to appropriate intent handler
-        3. Handler extracts entities, controls devices, and sends response
+        2. Validate device intents are for curtain control
+        3. Route to appropriate intent handler
+        4. Handler extracts entities, controls devices, and sends response
 
         Args:
             intent_request: The intent request containing classified intent and client info
@@ -313,7 +344,13 @@ class CurtainSkill(commons.BaseSkill):
         classified_intent = intent_request.classified_intent
         intent_type = classified_intent.intent_type
 
-        self.logger.info("Processing intent %s with confidence %.2f", intent_type, classified_intent.confidence)
+        self.logger.debug("Processing intent %s with confidence %.2f", intent_type, classified_intent.confidence)
+
+        # Validate device intents are actually for curtain control
+        device_intents = {IntentType.DEVICE_SET, IntentType.DEVICE_OPEN, IntentType.DEVICE_CLOSE}
+        if intent_type in device_intents and not self._is_curtain_intent(classified_intent):
+            self.logger.info("%s intent is not for curtain control, ignoring", intent_type)
+            return
 
         # Route to appropriate handler
         if intent_type == IntentType.DEVICE_OPEN:

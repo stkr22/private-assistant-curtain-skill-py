@@ -68,6 +68,7 @@ def create_mock_intent_request(  # noqa: PLR0913
     intent_type: IntentType,
     confidence: float = 0.9,
     devices: list[str] | None = None,
+    device_metadata: dict[str, dict] | None = None,
     rooms: list[str] | None = None,
     numbers: list[int] | None = None,
     current_room: str = "living room",
@@ -80,6 +81,7 @@ def create_mock_intent_request(  # noqa: PLR0913
         intent_type: The type of intent
         confidence: Confidence score for the intent
         devices: List of device names mentioned
+        device_metadata: Optional dict mapping device names to metadata dicts
         rooms: List of room names mentioned
         numbers: List of numbers mentioned (for position)
         current_room: The room where command originated
@@ -92,21 +94,21 @@ def create_mock_intent_request(  # noqa: PLR0913
     entities: dict[str, list[Entity]] = {}
 
     if devices:
-        entities["devices"] = [
+        entities["device"] = [
             Entity(
                 id=uuid.uuid4(),
                 type=EntityType.DEVICE,
                 raw_text=device,
                 normalized_value=device,
                 confidence=0.9,
-                metadata={},
+                metadata=device_metadata.get(device, {}) if device_metadata else {},
                 linked_to=[],
             )
             for device in devices
         ]
 
     if rooms:
-        entities["rooms"] = [
+        entities["room"] = [
             Entity(
                 id=uuid.uuid4(),
                 type=EntityType.ROOM,
@@ -120,7 +122,7 @@ def create_mock_intent_request(  # noqa: PLR0913
         ]
 
     if numbers:
-        entities["numbers"] = [
+        entities["number"] = [
             Entity(
                 id=uuid.uuid4(),
                 type=EntityType.NUMBER,
@@ -324,6 +326,8 @@ class TestCurtainSkill(unittest.IsolatedAsyncioTestCase):
         # Create intent request
         intent_request = create_mock_intent_request(
             intent_type=IntentType.DEVICE_OPEN,
+            devices=["curtains"],
+            device_metadata={"curtains": {"device_type": "curtain"}},
             current_room="living room",
             text="open the curtains",
         )
@@ -364,9 +368,11 @@ class TestCurtainSkill(unittest.IsolatedAsyncioTestCase):
         # Mock send_response
         self.skill.send_response = AsyncMock()
 
-        # Create intent request
+        # Create intent request with curtain device entity
         intent_request = create_mock_intent_request(
             intent_type=IntentType.DEVICE_OPEN,
+            devices=["curtains"],
+            device_metadata={"curtains": {"device_type": "curtain"}},
             current_room="living room",
         )
 
@@ -390,6 +396,8 @@ class TestCurtainSkill(unittest.IsolatedAsyncioTestCase):
         # Create intent request without number entity
         intent_request = create_mock_intent_request(
             intent_type=IntentType.DEVICE_SET,
+            devices=["curtains"],
+            device_metadata={"curtains": {"device_type": "curtain"}},
             current_room="living room",
             text="set the curtains",
         )
@@ -401,3 +409,119 @@ class TestCurtainSkill(unittest.IsolatedAsyncioTestCase):
         self.skill.send_response.assert_called_once()
         call_args = self.skill.send_response.call_args[0]
         self.assertIn("What position", call_args[0])
+
+
+class TestIntentValidation(unittest.IsolatedAsyncioTestCase):
+    """Test intent validation to prevent skill interference."""
+
+    async def asyncSetUp(self):
+        """Set up test fixtures before each test."""
+        # Create mock components for testing
+        self.mock_mqtt_client = AsyncMock()
+        self.mock_config = Mock()
+        self.mock_config.client_id = "curtain_skill_test"
+        self.mock_config.intent_analysis_result_topic = "test/intent"
+        self.mock_config.device_update_topic = "test/device_update"
+        self.mock_template_env = Mock(spec=jinja2.Environment)
+
+        # Mock task_group with proper create_task behavior
+        self.mock_task_group = Mock()
+
+        def create_mock_task(_coro, **kwargs):  # noqa: ARG001
+            mock_task = Mock()
+            mock_task.add_done_callback = Mock()
+            return mock_task
+
+        self.mock_task_group.create_task = Mock(side_effect=create_mock_task)
+
+        self.mock_logger = Mock(spec=logging.Logger)
+
+        # Create mock templates
+        self.mock_help_template = Mock()
+        self.mock_help_template.render.return_value = "Help text"
+        self.mock_state_template = Mock()
+        self.mock_state_template.render.return_value = "Curtains opened"
+        self.mock_set_template = Mock()
+        self.mock_set_template.render.return_value = "Curtains set to position"
+
+        self.mock_template_env.get_template.side_effect = lambda name: {
+            "help.j2": self.mock_help_template,
+            "state.j2": self.mock_state_template,
+            "set_curtain.j2": self.mock_set_template,
+        }[name]
+
+        # Create mock database engine (not actually used in unit tests)
+        self.mock_db_engine = Mock()
+
+        # Create skill instance
+        self.skill = CurtainSkill(
+            config_obj=self.mock_config,
+            mqtt_client=self.mock_mqtt_client,
+            template_env=self.mock_template_env,
+            task_group=self.mock_task_group,
+            engine=self.mock_db_engine,
+            logger=self.mock_logger,
+        )
+
+        # Mock add_task to avoid actual task execution
+        self.skill.add_task = Mock()
+
+    async def test_curtain_device_type_accepted(self):
+        """Test that intent with device_type='curtain' is accepted."""
+        intent_request = create_mock_intent_request(
+            intent_type=IntentType.DEVICE_OPEN,
+            devices=["curtains"],
+            device_metadata={"curtains": {"device_type": "curtain", "is_generic": False}},
+        )
+
+        is_curtain = self.skill._is_curtain_intent(intent_request.classified_intent)
+        self.assertTrue(is_curtain)
+
+    async def test_generic_curtain_accepted(self):
+        """Test that intent with is_generic=True and normalized_value='curtain' is accepted."""
+        intent_request = create_mock_intent_request(
+            intent_type=IntentType.DEVICE_OPEN,
+            devices=["curtain"],
+            device_metadata={"curtain": {"is_generic": True}},
+        )
+
+        is_curtain = self.skill._is_curtain_intent(intent_request.classified_intent)
+        self.assertTrue(is_curtain)
+
+    async def test_light_device_type_rejected(self):
+        """Test that intent with device_type='light' is rejected."""
+        intent_request = create_mock_intent_request(
+            intent_type=IntentType.DEVICE_SET,
+            devices=["lights"],
+            device_metadata={"lights": {"device_type": "light", "is_generic": False}},
+        )
+
+        is_curtain = self.skill._is_curtain_intent(intent_request.classified_intent)
+        self.assertFalse(is_curtain)
+
+    async def test_no_device_entity_rejected(self):
+        """Test that intent without device entity is rejected."""
+        intent_request = create_mock_intent_request(
+            intent_type=IntentType.DEVICE_OPEN,
+        )
+
+        is_curtain = self.skill._is_curtain_intent(intent_request.classified_intent)
+        self.assertFalse(is_curtain)
+
+    async def test_process_request_ignores_light_intent(self):
+        """Test that process_request silently ignores non-curtain device intents."""
+        self.skill.send_response = AsyncMock()
+
+        # Light device intent
+        intent_request = create_mock_intent_request(
+            intent_type=IntentType.DEVICE_SET,
+            devices=["lights"],
+            device_metadata={"lights": {"device_type": "light"}},
+            numbers=[75],
+        )
+
+        await self.skill.process_request(intent_request)
+
+        # Should NOT send any response
+        self.skill.send_response.assert_not_called()
+        self.skill.add_task.assert_not_called()
