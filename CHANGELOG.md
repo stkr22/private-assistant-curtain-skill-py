@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.0.3](https://github.com/stkr22/private-assistant-curtain-skill-py/compare/v2.0.2...v2.0.3) (2025-11-23)
+
+
+### Bug Fixes
+
+* update license to GPL-3.0-only in pyproject.toml ([9690bc6](https://github.com/stkr22/private-assistant-curtain-skill-py/commit/9690bc64f891fd2b5cd9455978ef02554c730a69))
+
 ## [2.0.2](https://github.com/stkr22/private-assistant-curtain-skill-py/compare/v2.0.1...v2.0.2) (2025-10-24)
 
 
