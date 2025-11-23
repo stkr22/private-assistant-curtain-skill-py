@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "private-assistant-curtain-skill"
-version = "2.0.2"
+version = "2.0.3"
 description = "Curtain Control Skill for Private Assistant: Enables automated and voice-activated curtain control within smart home environments."
 authors = [
     { name = "stkr22", email = "stkr22@github.com" }
