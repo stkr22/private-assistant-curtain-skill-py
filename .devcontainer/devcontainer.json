@@ -2,7 +2,7 @@
 	"name": "private-assistant-curtain-skill-dev-environment",
 	"dockerComposeFile": "compose.yml",
 	"service": "dev",
-	"workspaceFolder": "/workspace",
+	"workspaceFolder": "/workspace/private-assistant-curtain-skill-py",
 	"remoteUser": "vscode",
 	"customizations": {
 		"vscode": {

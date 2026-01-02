@@ -4,9 +4,8 @@ from typing import Annotated
 
 import jinja2
 import typer
-from private_assistant_commons import mqtt_connection_handler, skill_config, skill_logger
-from private_assistant_commons.database import PostgresConfig
-from sqlalchemy.ext.asyncio import create_async_engine
+from private_assistant_commons import MqttConfig, mqtt_connection_handler, skill_config, skill_logger
+from private_assistant_commons.database import create_skill_engine
 
 from private_assistant_curtain_skill import curtain_skill
 
@@ -28,9 +27,8 @@ async def start_skill(
     config_obj = skill_config.load_config(config_path, skill_config.SkillConfig)
 
     # Create an async database engine for global device registry
-    # AIDEV-NOTE: PostgresConfig uses environment variables from compose.yml
-    db_config = PostgresConfig()
-    db_engine_async = create_async_engine(db_config.connection_string_async)
+    # AIDEV-NOTE: create_skill_engine provides automatic pool resilience (pool_pre_ping, pool_recycle, command_timeout)
+    db_engine_async = create_skill_engine()
 
     # AIDEV-NOTE: No custom table creation needed - global device registry tables
     # are managed by BaseSkill and commons library
@@ -47,6 +45,7 @@ async def start_skill(
     await mqtt_connection_handler.mqtt_connection_handler(
         curtain_skill.CurtainSkill,
         config_obj,
+        mqtt_config=MqttConfig(),
         retry_interval=5,
         logger=logger,
         template_env=template_env,

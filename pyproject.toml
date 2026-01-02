@@ -27,10 +27,10 @@ classifiers = [
 
 requires-python = ">=3.12,<3.14"
 dependencies = [
-    "pydantic~=2.9.2",
+    "pydantic",
     "jinja2~=3.1.3",
-    "private-assistant-commons~=5.2.2",
-    "typer~=0.20.0",
+    "private-assistant-commons~=5.4.0",
+    "typer~=0.21.0",
 ]
 
 [project.urls]
@@ -85,6 +85,7 @@ indent-style = "space"
 [tool.mypy]
 warn_return_any = true
 warn_unused_configs = true
+plugins = ["pydantic.mypy"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
