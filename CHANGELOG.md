@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.0.4](https://github.com/stkr22/private-assistant-curtain-skill-py/compare/v2.0.3...v2.0.4) (2026-01-02)
+
+
+### Bug Fixes
+
+* trigger release ([73fdf07](https://github.com/stkr22/private-assistant-curtain-skill-py/commit/73fdf070433bcb00aeea9dac0614e8bad9571127))
+
 ## [2.0.3](https://github.com/stkr22/private-assistant-curtain-skill-py/compare/v2.0.2...v2.0.3) (2025-11-23)
 
 
