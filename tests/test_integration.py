@@ -34,9 +34,8 @@ import aiomqtt
 import pytest
 import yaml
 from private_assistant_commons import ClassifiedIntent, ClientRequest, Entity, EntityType, IntentRequest, IntentType
-from private_assistant_commons.database import PostgresConfig
+from private_assistant_commons.database import create_skill_engine
 from private_assistant_commons.database.models import DeviceType, GlobalDevice, Room, Skill
-from sqlalchemy.ext.asyncio import create_async_engine
 from sqlmodel import SQLModel, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -52,8 +51,7 @@ logger = logging.getLogger(__name__)
 @pytest.fixture(scope="function")
 async def db_engine():
     """Create a database engine for integration tests."""
-    db_config = PostgresConfig()
-    engine = create_async_engine(db_config.connection_string_async, echo=False)
+    engine = create_skill_engine()
 
     # Ensure tables exist
     async with engine.begin() as conn:
@@ -229,12 +227,10 @@ async def test_device_office(
 
 
 @pytest.fixture
-async def skill_config_file(mqtt_config):
+async def skill_config_file(mqtt_config):  # noqa: ARG001
     """Create a temporary config file for the skill."""
     config = {
         "client_id": "curtain-skill-integration-test",
-        "mqtt_server_host": mqtt_config["host"],
-        "mqtt_server_port": mqtt_config["port"],
         "base_topic": "assistant",
     }
 
@@ -533,7 +529,7 @@ class TestDeviceSetCommand:
                         metadata={},
                         linked_to=[],
                     )
-                ]
+                ],
             },
             alternative_intents=[],
             raw_text="set blinds to 75 percent",
