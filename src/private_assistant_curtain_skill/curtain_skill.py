@@ -1,3 +1,5 @@
+"""Curtain skill for controlling smart curtains via MQTT commands."""
+
 import asyncio
 import logging
 
@@ -23,6 +25,19 @@ class Parameters(BaseModel):
 
 
 class CurtainSkill(commons.BaseSkill):
+    """Skill for controlling curtains via MQTT commands.
+
+    Supports opening, closing, and setting curtain positions through voice commands
+    or text-based intent requests.
+    """
+
+    help_text = (
+        "The CurtainSkill can be used in the following ways:\n"
+        '- "Open the curtain" to open a curtain.\n'
+        '- "Close the curtain" to close a curtain.\n'
+        '- "Set curtain to 50" to set the curtain to 50%.'
+    )
+
     def __init__(  # noqa: PLR0913
         self,
         config_obj: commons.SkillConfig,
@@ -32,6 +47,17 @@ class CurtainSkill(commons.BaseSkill):
         engine: AsyncEngine,
         logger: logging.Logger,
     ) -> None:
+        """Initialize the CurtainSkill with required dependencies.
+
+        Args:
+            config_obj: Skill configuration
+            mqtt_client: MQTT client for device communication
+            template_env: Jinja2 environment for response templates
+            task_group: Asyncio task group for background tasks
+            engine: SQLAlchemy async engine for database operations
+            logger: Logger instance for this skill
+
+        """
         # Pass engine to BaseSkill (NEW REQUIRED PARAMETER)
         super().__init__(
             config_obj=config_obj,
@@ -46,7 +72,6 @@ class CurtainSkill(commons.BaseSkill):
             IntentType.DEVICE_OPEN: 0.8,  # "open the curtains"
             IntentType.DEVICE_CLOSE: 0.8,  # "close the curtains"
             IntentType.DEVICE_SET: 0.8,  # "set curtain to 50%"
-            IntentType.SYSTEM_HELP: 0.7,  # "help with curtains"
         }
 
         # Configure device types for device registry
@@ -66,9 +91,9 @@ class CurtainSkill(commons.BaseSkill):
 
         Raises:
             RuntimeError: If critical templates cannot be loaded
+
         """
         template_mappings = {
-            IntentType.SYSTEM_HELP: "help.j2",
             IntentType.DEVICE_OPEN: "state.j2",
             IntentType.DEVICE_CLOSE: "state.j2",
             IntentType.DEVICE_SET: "set_curtain.j2",
@@ -99,6 +124,7 @@ class CurtainSkill(commons.BaseSkill):
 
         Returns:
             True if intent is for curtain control, False otherwise
+
         """
         # Check for device entities
         device_entities = classified_intent.entities.get("device", [])
@@ -118,14 +144,14 @@ class CurtainSkill(commons.BaseSkill):
         return False
 
     def _get_curtain_devices(self, target_rooms: list[str]) -> list[CurtainSkillDevice]:
-        """
-        Get curtain devices from global registry for specified rooms.
+        """Get curtain devices from global registry for specified rooms.
 
         Args:
             target_rooms: List of room names to filter devices by
 
         Returns:
             List of CurtainSkillDevice instances for the target rooms
+
         """
         curtain_devices = []
         for device in self.global_devices:
@@ -144,14 +170,14 @@ class CurtainSkill(commons.BaseSkill):
         return curtain_devices
 
     async def _extract_parameters(self, intent_request: IntentRequest) -> Parameters:
-        """
-        Extract parameters from IntentRequest for curtain control.
+        """Extract parameters from IntentRequest for curtain control.
 
         Args:
             intent_request: The validated intent request
 
         Returns:
             Parameters object with devices, rooms, and position
+
         """
         classified_intent = intent_request.classified_intent
         client_request = intent_request.client_request
@@ -187,8 +213,7 @@ class CurtainSkill(commons.BaseSkill):
         return parameters
 
     def _render_response(self, intent_type: IntentType, parameters: Parameters) -> str:
-        """
-        Render response template for the given intent type.
+        """Render response template for the given intent type.
 
         Args:
             intent_type: The type of intent to render response for
@@ -196,6 +221,7 @@ class CurtainSkill(commons.BaseSkill):
 
         Returns:
             Rendered response string
+
         """
         template = self.intent_to_template.get(intent_type)
         if template:
@@ -209,12 +235,12 @@ class CurtainSkill(commons.BaseSkill):
         return "Sorry, I couldn't process your request."
 
     async def _send_mqtt_commands(self, intent_type: IntentType, parameters: Parameters) -> None:
-        """
-        Send MQTT commands to control curtain devices.
+        """Send MQTT commands to control curtain devices.
 
         Args:
             intent_type: The intent type (DEVICE_OPEN, DEVICE_CLOSE, DEVICE_SET)
             parameters: Parameters containing target devices and position
+
         """
         for device in parameters.targets:
             # Determine payload based on intent type
@@ -239,6 +265,7 @@ class CurtainSkill(commons.BaseSkill):
 
         Args:
             intent_request: The intent request with classified intent and client request
+
         """
         client_request = intent_request.client_request
 
@@ -262,6 +289,7 @@ class CurtainSkill(commons.BaseSkill):
 
         Args:
             intent_request: The intent request with classified intent and client request
+
         """
         client_request = intent_request.client_request
 
@@ -285,6 +313,7 @@ class CurtainSkill(commons.BaseSkill):
 
         Args:
             intent_request: The intent request with classified intent and client request
+
         """
         classified_intent = intent_request.classified_intent
         client_request = intent_request.client_request
@@ -313,24 +342,8 @@ class CurtainSkill(commons.BaseSkill):
         self.add_task(self.send_response(answer, client_request=client_request))
         self.add_task(self._send_mqtt_commands(IntentType.DEVICE_SET, parameters))
 
-    async def _handle_system_help(self, intent_request: IntentRequest) -> None:
-        """Handle SYSTEM_HELP intent - show help information.
-
-        Args:
-            intent_request: The intent request with classified intent and client request
-        """
-        client_request = intent_request.client_request
-        current_room = client_request.room
-
-        # Build empty parameters for help template
-        parameters = Parameters(rooms=[current_room])
-
-        # Send response
-        answer = self._render_response(IntentType.SYSTEM_HELP, parameters)
-        self.add_task(self.send_response(answer, client_request=client_request))
-
     async def process_request(self, intent_request: IntentRequest) -> None:
-        """Main request processing method - routes intent to appropriate handler.
+        """Process intent request and route to appropriate handler.
 
         Orchestrates the full command processing pipeline:
         1. Extract intent type from classified intent
@@ -340,6 +353,7 @@ class CurtainSkill(commons.BaseSkill):
 
         Args:
             intent_request: The intent request containing classified intent and client info
+
         """
         classified_intent = intent_request.classified_intent
         intent_type = classified_intent.intent_type
@@ -359,8 +373,6 @@ class CurtainSkill(commons.BaseSkill):
             await self._handle_device_close(intent_request)
         elif intent_type == IntentType.DEVICE_SET:
             await self._handle_device_set(intent_request)
-        elif intent_type == IntentType.SYSTEM_HELP:
-            await self._handle_system_help(intent_request)
         else:
             self.logger.warning("Unsupported intent type: %s", intent_type)
             await self.send_response(

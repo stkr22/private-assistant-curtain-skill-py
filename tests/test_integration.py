@@ -34,8 +34,7 @@ import aiomqtt
 import pytest
 import yaml
 from private_assistant_commons import ClassifiedIntent, ClientRequest, Entity, EntityType, IntentRequest, IntentType
-from private_assistant_commons.database import create_skill_engine
-from private_assistant_commons.database.models import DeviceType, GlobalDevice, Room, Skill
+from private_assistant_commons.database import DeviceType, GlobalDevice, Room, Skill, create_skill_engine
 from sqlmodel import SQLModel, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 

@@ -1,3 +1,5 @@
+"""Entry point for the curtain skill service."""
+
 import asyncio
 import pathlib
 from typing import Annotated
@@ -14,12 +16,24 @@ app = typer.Typer()
 
 @app.command()
 def main(config_path: Annotated[pathlib.Path, typer.Argument(envvar="PRIVATE_ASSISTANT_CONFIG_PATH")]) -> None:
+    """Run the curtain skill with the provided configuration.
+
+    Args:
+        config_path: Path to the skill configuration file
+
+    """
     asyncio.run(start_skill(config_path))
 
 
 async def start_skill(
     config_path: pathlib.Path,
 ):
+    """Initialize and start the curtain skill with MQTT connection.
+
+    Args:
+        config_path: Path to the skill configuration file
+
+    """
     # Set up logger early on
     logger = skill_logger.SkillLogger.get_logger("Private Assistant CurtainSkill")
 

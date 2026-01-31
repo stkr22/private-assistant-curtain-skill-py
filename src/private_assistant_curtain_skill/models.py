@@ -1,10 +1,12 @@
+"""Data models for curtain skill devices and MQTT configuration."""
+
 import re
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, field_validator
 
 if TYPE_CHECKING:
-    from private_assistant_commons.database.models import GlobalDevice
+    from private_assistant_commons.database import GlobalDevice
 
 # Define a regex pattern for a valid MQTT topic
 MQTT_TOPIC_REGEX = re.compile(r"[\$#\+\s\0-\31]+")
@@ -12,8 +14,7 @@ MAX_TOPIC_LENGTH = 128
 
 
 class CurtainSkillDevice(BaseModel):
-    """
-    Pydantic model representing a curtain device with MQTT control configuration.
+    """Pydantic model representing a curtain device with MQTT control configuration.
 
     This model is used to extract curtain-specific data from the global device registry.
     The actual device data is stored in GlobalDevice.device_attributes.
@@ -41,14 +42,14 @@ class CurtainSkillDevice(BaseModel):
 
     @classmethod
     def from_global_device(cls, global_device: "GlobalDevice") -> "CurtainSkillDevice":
-        """
-        Transform GlobalDevice to CurtainSkillDevice with type safety.
+        """Transform GlobalDevice to CurtainSkillDevice with type safety.
 
         Args:
             global_device: The global device registry entry
 
         Returns:
             CurtainSkillDevice with MQTT configuration extracted from device_attributes
+
         """
         attrs = global_device.device_attributes or {}
         return cls(

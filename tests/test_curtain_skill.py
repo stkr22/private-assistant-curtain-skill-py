@@ -13,7 +13,7 @@ from private_assistant_commons import (
     IntentRequest,
     IntentType,
 )
-from private_assistant_commons.database.models import DeviceType, GlobalDevice, Room
+from private_assistant_commons.database import DeviceType, GlobalDevice, Room
 
 from private_assistant_curtain_skill.curtain_skill import CurtainSkill
 
