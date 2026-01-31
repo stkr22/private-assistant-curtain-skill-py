@@ -1,5 +1,13 @@
 # Changelog
 
+## [2.1.0](https://github.com/stkr22/private-assistant-curtain-skill-py/compare/v2.0.4...v2.1.0) (2026-01-31)
+
+
+### Features
+
+* restructure help intent ([bd61bf3](https://github.com/stkr22/private-assistant-curtain-skill-py/commit/bd61bf3de38ca36c2257165488049e53fdef779a))
+* restructure help intent ([d91708d](https://github.com/stkr22/private-assistant-curtain-skill-py/commit/d91708d618335c05ef061ec779592f579ed6a133))
+
 ## [2.0.4](https://github.com/stkr22/private-assistant-curtain-skill-py/compare/v2.0.3...v2.0.4) (2026-01-02)
 
 
