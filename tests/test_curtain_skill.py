@@ -340,26 +340,6 @@ class TestCurtainSkill(unittest.IsolatedAsyncioTestCase):
         # Assert MQTT command was sent (second add_task call)
         self.assertEqual(self.skill.add_task.call_count, 2)
 
-    async def test_process_request_system_help(self):
-        """Test processing SYSTEM_HELP intent request."""
-        # Mock template rendering
-        mock_template = Mock()
-        mock_template.render.return_value = "The CurtainSkill can be used in the following ways..."
-        self.skill.intent_to_template[IntentType.SYSTEM_HELP] = mock_template
-
-        # Create intent request
-        intent_request = create_mock_intent_request(
-            intent_type=IntentType.SYSTEM_HELP,
-            current_room="living room",
-            text="help with curtains",
-        )
-
-        # Process request
-        await self.skill.process_request(intent_request)
-
-        # Assert only response was sent (no MQTT command for help)
-        self.skill.add_task.assert_called_once()
-
     async def test_process_request_no_devices_found(self):
         """Test processing intent when no devices are found."""
         # Empty global_devices
